@@ -19,6 +19,9 @@ flutter pub get
 flutter run            # use a real device, the iOS Simulator has no NFC
 ```
 
+Windows note: keep the project in a path with **ASCII characters only** (no Cyrillic). The Gradle
+wrapper and the Dart AOT/Kotlin compilers fail on non-ASCII paths, while GitHub Actions is unaffected.
+
 Build an unsigned iOS app on macOS:
 
 ```bash
