@@ -52,7 +52,7 @@ class DecodedRecord {
     this.icon = 'text',
   });
 
-  /// Short label of the record type, for example `نص` or `رابط`.
+  /// Short label of the record type, for example `Text` or `Link`.
   final String type;
 
   /// Decoded payload of the record.
@@ -118,33 +118,33 @@ String normalizeUri(String value) {
 DecodedRecord decodeRecord(NdefRecord record) {
   switch (record.typeNameFormat) {
     case TypeNameFormat.empty:
-      return const DecodedRecord(type: 'فارغ', value: '—', size: 0, icon: 'empty');
+      return const DecodedRecord(type: 'Empty', value: '—', size: 0, icon: 'empty');
     case TypeNameFormat.wellKnown:
       final String type = _ascii(record.type);
       switch (type) {
         case 'T':
           return DecodedRecord(
-            type: 'نص (T)',
+            type: 'Text (T)',
             value: _decodeTextPayload(record.payload),
             size: record.payload.length,
           );
         case 'U':
           return DecodedRecord(
-            type: 'رابط (U)',
+            type: 'Link (U)',
             value: _decodeUriPayload(record.payload),
             size: record.payload.length,
             icon: 'link',
           );
         case 'Sp':
           return DecodedRecord(
-            type: 'ملصق ذكي (Sp)',
+            type: 'Smart poster (Sp)',
             value: _preview(record.payload),
             size: record.payload.length,
             icon: 'data',
           );
         default:
           return DecodedRecord(
-            type: 'قياسي ($type)',
+            type: 'Well known ($type)',
             value: _preview(record.payload),
             size: record.payload.length,
             icon: 'data',
@@ -153,35 +153,35 @@ DecodedRecord decodeRecord(NdefRecord record) {
     case TypeNameFormat.media:
       final String mime = _ascii(record.type);
       return DecodedRecord(
-        type: 'وسائط ($mime)',
+        type: 'Media ($mime)',
         value: mime.startsWith('text/') ? _decodeUtf8(record.payload) : _preview(record.payload),
         size: record.payload.length,
         icon: 'data',
       );
     case TypeNameFormat.absoluteUri:
       return DecodedRecord(
-        type: 'رابط مطلق',
+        type: 'Absolute URI',
         value: record.type.isEmpty ? _decodeUtf8(record.payload) : _decodeUtf8(record.type),
         size: record.payload.length,
         icon: 'link',
       );
     case TypeNameFormat.external:
       return DecodedRecord(
-        type: 'خارجي (${_ascii(record.type)})',
+        type: 'External (${_ascii(record.type)})',
         value: _preview(record.payload),
         size: record.payload.length,
         icon: 'data',
       );
     case TypeNameFormat.unknown:
       return DecodedRecord(
-        type: 'غير معروف',
+        type: 'Unknown',
         value: _preview(record.payload),
         size: record.payload.length,
         icon: 'data',
       );
     case TypeNameFormat.unchanged:
       return DecodedRecord(
-        type: 'مقطع',
+        type: 'Chunked record',
         value: _preview(record.payload),
         size: record.payload.length,
         icon: 'data',

@@ -17,7 +17,7 @@ class NfcApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'NFC قراءة وكتابة',
+      title: 'NFC Reader & Writer',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -26,8 +26,8 @@ class NfcApp extends StatelessWidget {
           brightness: Brightness.dark,
         ),
       ),
-      locale: const Locale('ar'),
-      supportedLocales: const <Locale>[Locale('ar'), Locale('en')],
+      locale: const Locale('en'),
+      supportedLocales: const <Locale>[Locale('en')],
       localizationsDelegates: const <LocalizationsDelegate<Object>>[
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
@@ -89,6 +89,8 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
+  bool get _isIos => Theme.of(context).platform == TargetPlatform.iOS;
+
   Future<void> _refreshAvailability() async {
     try {
       final NfcAvailability availability = await NfcManager.instance.checkAvailability();
@@ -118,7 +120,7 @@ class _HomePageState extends State<HomePage> {
     }
     if (_mode == NfcMode.write && _valueController.text.trim().isEmpty) {
       setState(() {
-        _errorMessage = 'اكتب نصًا أو رابطًا قبل بدء الكتابة.';
+        _errorMessage = 'Type some text or a link before writing.';
         _successMessage = null;
       });
       return;
@@ -133,14 +135,17 @@ class _HomePageState extends State<HomePage> {
 
     var handled = false;
     try {
+      // The availability check is only advisory: on iOS it also fails when the
+      // app was signed without the NFC entitlement, so try the session anyway
+      // and report the exact error from CoreNFC.
       await NfcManager.instance.startSession(
         pollingOptions: const <NfcPollingOption>{
           NfcPollingOption.iso14443,
           NfcPollingOption.iso15693,
         },
         alertMessageIos: _mode == NfcMode.read
-            ? 'قرّب الجزء العلوي من الآيفون من وسم NFC للقراءة'
-            : 'قرّب الجزء العلوي من الآيفون من الوسم للكتابة',
+            ? 'Hold the top of your iPhone near the NFC tag to read it'
+            : 'Hold the top of your iPhone near the NFC tag to write it',
         invalidateAfterFirstReadIos: false,
         onSessionErrorIos: _onIosSessionError,
         onDiscovered: (NfcTag tag) async {
@@ -157,9 +162,20 @@ class _HomePageState extends State<HomePage> {
       }
       setState(() {
         _busy = false;
-        _errorMessage = 'تعذّر بدء جلسة NFC: $error';
+        _errorMessage = _describeStartFailure(error);
       });
     }
+  }
+
+  String _describeStartFailure(Object error) {
+    final String raw = error.toString();
+    if (_isIos) {
+      return 'Could not start the NFC session. $raw\n\n'
+          'iOS only allows NFC when the app is signed with the NFC entitlement '
+          '(paid Apple Developer account). Free signing and the Simulator cannot '
+          'start an NFC session, even though the iPhone supports NFC.';
+    }
+    return 'Could not start the NFC session: $raw';
   }
 
   void _onIosSessionError(NfcReaderSessionErrorIos error) {
@@ -169,18 +185,29 @@ class _HomePageState extends State<HomePage> {
     final bool userCanceled =
         error.code == NfcReaderErrorCodeIos.readerSessionInvalidationErrorUserCanceled ||
         error.code == NfcReaderErrorCodeIos.readerSessionInvalidationErrorFirstNDEFTagRead;
+    if (userCanceled) {
+      setState(() => _busy = false);
+      return;
+    }
     setState(() {
       _busy = false;
-      if (!userCanceled) {
-        _errorMessage = error.message;
-      }
+      _errorMessage = switch (error.code) {
+        NfcReaderErrorCodeIos.readerErrorUnsupportedFeature =>
+          'CoreNFC refused the session: this build is not allowed to use NFC. '
+              'The app must be signed with the NFC entitlement (paid Apple Developer account).',
+        NfcReaderErrorCodeIos.readerSessionInvalidationErrorSessionTimeout =>
+          'The NFC session timed out. Hold the top of the iPhone against the tag and try again.',
+        NfcReaderErrorCodeIos.readerSessionInvalidationErrorSystemIsBusy =>
+          'NFC is busy in another app. Close it and try again.',
+        _ => error.message,
+      };
     });
   }
 
   Future<void> _handleTag(NfcTag tag) async {
     final Ndef? ndef = Ndef.from(tag);
     if (ndef == null) {
-      await _stop(error: 'هذا الوسم لا يدعم NDEF. جرّب وسمًا آخر (NTAG213/215/216 مثلًا).');
+      await _stop(error: 'This tag does not support NDEF. Try an NDEF tag such as NTAG213/215/216.');
       return;
     }
 
@@ -198,23 +225,23 @@ class _HomePageState extends State<HomePage> {
           ? const <DecodedRecord>[]
           : message.records.map(decodeRecord).toList(growable: false);
       await _stop(
-        success: records.isEmpty ? 'تمت القراءة: الوسم فارغ.' : 'تمت قراءة ${records.length} سجل من الوسم.',
+        success: records.isEmpty ? 'Read complete: this tag is empty.' : 'Read ${records.length} record(s) from the tag.',
         tag: TagSummary(
           writable: ndef.isWritable,
           capacity: ndef.maxSize,
           messageSize: message?.byteLength,
         ),
         records: records,
-        alert: 'تمت القراءة بنجاح',
+        alert: 'Tag read successfully',
       );
     } catch (error) {
-      await _stop(error: 'تعذّرت قراءة الوسم: $error');
+      await _stop(error: 'Could not read the tag: $error');
     }
   }
 
   Future<void> _write(Ndef ndef) async {
     if (!ndef.isWritable) {
-      await _stop(error: 'هذا الوسم غير قابل للكتابة (مقفل أو ممتلئ).');
+      await _stop(error: 'This tag is read-only (locked or full), so it cannot be written.');
       return;
     }
     final String raw = _valueController.text.trim();
@@ -224,24 +251,24 @@ class _HomePageState extends State<HomePage> {
     final NdefMessage message = NdefMessage(records: <NdefRecord>[record]);
     if (ndef.maxSize > 0 && message.byteLength > ndef.maxSize) {
       await _stop(
-        error: 'حجم البيانات (${message.byteLength} بايت) أكبر من سعة الوسم (${ndef.maxSize} بايت).',
+        error: 'The data is ${message.byteLength} bytes but the tag only holds ${ndef.maxSize} bytes.',
       );
       return;
     }
     try {
       await ndef.write(message: message);
       await _stop(
-        success: 'تمت الكتابة على الوسم بنجاح.',
+        success: 'The tag was written successfully.',
         tag: TagSummary(
           writable: ndef.isWritable,
           capacity: ndef.maxSize,
           messageSize: message.byteLength,
         ),
         records: <DecodedRecord>[decodeRecord(record)],
-        alert: 'تمت الكتابة بنجاح',
+        alert: 'Tag written successfully',
       );
     } catch (error) {
-      await _stop(error: 'تعذّرت الكتابة على الوسم: $error');
+      await _stop(error: 'Could not write the tag: $error');
     }
   }
 
@@ -285,11 +312,11 @@ class _HomePageState extends State<HomePage> {
     final ThemeData theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('NFC قراءة وكتابة'),
+        title: const Text('NFC Reader & Writer'),
         centerTitle: true,
         actions: <Widget>[
           IconButton(
-            tooltip: 'إعادة فحص NFC',
+            tooltip: 'Check NFC again',
             onPressed: () {
               setState(() => _checkingAvailability = true);
               _refreshAvailability();
@@ -308,12 +335,12 @@ class _HomePageState extends State<HomePage> {
               segments: const <ButtonSegment<NfcMode>>[
                 ButtonSegment<NfcMode>(
                   value: NfcMode.read,
-                  label: Text('قراءة'),
+                  label: Text('Read'),
                   icon: Icon(Icons.download_rounded),
                 ),
                 ButtonSegment<NfcMode>(
                   value: NfcMode.write,
-                  label: Text('كتابة'),
+                  label: Text('Write'),
                   icon: Icon(Icons.upload_rounded),
                 ),
               ],
@@ -328,8 +355,8 @@ class _HomePageState extends State<HomePage> {
             if (_mode == NfcMode.write) ...<Widget>[
               SegmentedButton<RecordKind>(
                 segments: const <ButtonSegment<RecordKind>>[
-                  ButtonSegment<RecordKind>(value: RecordKind.text, label: Text('نص')),
-                  ButtonSegment<RecordKind>(value: RecordKind.uri, label: Text('رابط')),
+                  ButtonSegment<RecordKind>(value: RecordKind.text, label: Text('Text')),
+                  ButtonSegment<RecordKind>(value: RecordKind.uri, label: Text('Link')),
                 ],
                 selected: <RecordKind>{_kind},
                 onSelectionChanged: _busy
@@ -344,11 +371,11 @@ class _HomePageState extends State<HomePage> {
                 enabled: !_busy,
                 minLines: 1,
                 maxLines: 4,
-                textDirection: _kind == RecordKind.uri ? TextDirection.ltr : TextDirection.rtl,
+                textDirection: _kind == RecordKind.uri ? TextDirection.ltr : null,
                 keyboardType: _kind == RecordKind.uri ? TextInputType.url : TextInputType.text,
                 decoration: InputDecoration(
-                  labelText: _kind == RecordKind.uri ? 'الرابط' : 'النص',
-                  hintText: _kind == RecordKind.uri ? 'https://example.com' : 'اكتب البيانات التي تريد تخزينها',
+                  labelText: _kind == RecordKind.uri ? 'Link' : 'Text',
+                  hintText: _kind == RecordKind.uri ? 'https://example.com' : 'Data you want to store on the tag',
                   border: const OutlineInputBorder(),
                   prefixIcon: Icon(
                     _kind == RecordKind.uri ? Icons.link_rounded : Icons.notes_rounded,
@@ -372,13 +399,13 @@ class _HomePageState extends State<HomePage> {
                   : const Icon(Icons.nfc_rounded),
               label: Text(
                 _busy
-                    ? 'في انتظار الوسم…'
-                    : (_mode == NfcMode.read ? 'بدء القراءة' : 'بدء الكتابة'),
+                    ? 'Waiting for a tag…'
+                    : (_mode == NfcMode.read ? 'Start reading' : 'Start writing'),
               ),
             ),
             const SizedBox(height: 8),
             Text(
-              'قرّب الجزء العلوي من الجهاز من الوسم دون لمسه، ويُفضّل إزالة الغطاء السميك.',
+              'Hold the top of the iPhone near the tag without touching it. Remove thick cases first.',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
@@ -394,14 +421,15 @@ class _HomePageState extends State<HomePage> {
             ],
             if (_records.isNotEmpty) ...<Widget>[
               const SizedBox(height: 16),
-              Text('محتويات الوسم', style: theme.textTheme.titleMedium),
+              Text('Tag contents', style: theme.textTheme.titleMedium),
               const SizedBox(height: 8),
               ..._records.map((DecodedRecord record) => _recordTile(theme, record)),
             ],
             const SizedBox(height: 24),
             Text(
-              'ملاحظة: على iOS لا تعمل قراءة NFC إلا إذا كان التطبيق موقّعًا بحساب Apple Developer يملك صلاحية NFC (حساب مدفوع). '
-              'التوقيع المجاني لا يمنح هذه الصلاحية.',
+              'Note: on iOS the NFC reader only works when the app is signed with the NFC '
+              'entitlement, which requires a paid Apple Developer account. Free signing installs '
+              'the app but cannot use NFC.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -421,27 +449,31 @@ class _HomePageState extends State<HomePage> {
 
     if (_checkingAvailability) {
       color = colors.onSurfaceVariant;
-      title = 'جارٍ فحص دعم NFC…';
-      subtitle = 'تحقّق من أن الجهاز يدعم NFC.';
+      title = 'Checking NFC support…';
+      subtitle = 'Looking for an NFC reader on this device.';
     } else if (_availabilityError != null) {
       color = colors.error;
       icon = Icons.error_outline_rounded;
-      title = 'NFC غير متاح على هذه المنصة';
-      subtitle = _availabilityError!;
+      title = 'NFC status unknown';
+      subtitle = '${_availabilityError!}\nYou can still tap the button to try a session.';
     } else if (_availability == NfcAvailability.enabled) {
       color = const Color(0xFF2ECC71);
-      title = 'NFC جاهز';
-      subtitle = 'يمكنك القراءة والكتابة على وسوم NDEF.';
+      title = 'NFC is ready';
+      subtitle = 'Read and write NDEF tags.';
     } else if (_availability == NfcAvailability.disabled) {
       color = Colors.orangeAccent;
       icon = Icons.sensors_off_rounded;
-      title = 'NFC مغلق';
-      subtitle = 'فعّل NFC من إعدادات الجهاز ثم أعد المحاولة.';
+      title = 'NFC is turned off';
+      subtitle = 'Enable NFC in the device settings, then tap refresh.';
     } else {
-      color = colors.error;
+      color = Colors.orangeAccent;
       icon = Icons.sensors_off_rounded;
-      title = 'هذا الجهاز لا يدعم NFC';
-      subtitle = 'جرّب جهازًا آخر يدعم قراءة الوسوم.';
+      title = 'NFC session not available';
+      subtitle = _isIos
+          ? 'This iPhone may support NFC, but iOS only allows it for apps signed with the NFC '
+              'entitlement (paid Apple Developer account). Tap the button to try — the exact '
+              'CoreNFC error will be shown.'
+          : 'This device does not expose an NFC reader to the app.';
     }
 
     return Card(
@@ -449,6 +481,7 @@ class _HomePageState extends State<HomePage> {
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Icon(icon, color: color, size: 32),
             const SizedBox(width: 14),
@@ -493,9 +526,9 @@ class _HomePageState extends State<HomePage> {
   Widget _tagCard(ThemeData theme) {
     final TagSummary tag = _tag!;
     final List<Widget> rows = <Widget>[
-      _infoRow('قابل للكتابة', tag.writable ? 'نعم' : 'لا (مقفل)'),
-      _infoRow('سعة الوسم', tag.capacity > 0 ? '${tag.capacity} بايت' : 'غير معروفة'),
-      if (tag.messageSize != null) _infoRow('حجم الرسالة', '${tag.messageSize} بايت'),
+      _infoRow('Writable', tag.writable ? 'Yes' : 'No (read-only)'),
+      _infoRow('Tag capacity', tag.capacity > 0 ? '${tag.capacity} bytes' : 'Unknown'),
+      if (tag.messageSize != null) _infoRow('Message size', '${tag.messageSize} bytes'),
     ];
     return Card(
       color: theme.colorScheme.surfaceContainerHighest,
@@ -504,7 +537,7 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text('تفاصيل الوسم', style: theme.textTheme.titleMedium),
+            Text('Tag details', style: theme.textTheme.titleMedium),
             const SizedBox(height: 10),
             ...rows,
           ],

@@ -11,7 +11,7 @@ void main() {
       expect(record.typeNameFormat, TypeNameFormat.wellKnown);
       expect(record.type, <int>[0x54]);
       expect(decoded.value, 'مرحبًا بالعالم');
-      expect(decoded.type, 'نص (T)');
+      expect(decoded.type, 'Text (T)');
     });
 
     test('stores the language code in the status byte', () {

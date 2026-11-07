@@ -1,65 +1,64 @@
-# NFC Read Write · NFC قراءة وكتابة
+# NFC Reader & Writer
 
-تطبيق Flutter بسيط لقراءة وكتابة وسوم **NFC / NDEF** (نص أو رابط) على **iOS** و**Android**،
-مع بناء تلقائي على GitHub Actions ينتج ملف **IPA غير موقّع** جاهز للتثبيت على الآيفون بعد توقيعه بأي أداة توقيع.
+A small Flutter app that reads and writes **NFC / NDEF** tags (text or link records) on **iOS** and **Android**.
+GitHub Actions builds an **unsigned IPA** on every push, ready to be signed with any sideloading tool and installed on an iPhone.
 
-## المزايا
+## Features
 
-- واجهة عربية (RTL) بسيطة: تبويب قراءة وتبويب كتابة.
-- قراءة كل سجلات NDEF الموجودة على الوسم (نص، رابط، وسائط، بيانات خام).
-- كتابة سجل نص (Text record) أو سجل رابط (URI record) على أي وسم NDEF قابل للكتابة.
-- عرض تفاصيل الوسم: هل هو قابل للكتابة، سعته بالبايت، وحجم الرسالة المكتوبة.
-- فحص تلقائي لتوفر NFC على الجهاز مع رسائل خطأ واضحة.
+- Plain English UI with a Read tab and a Write tab.
+- Reads every NDEF record on a tag: text, link, media, external or raw data.
+- Writes a Text record or a URI record to any writable NDEF tag.
+- Shows tag details: writable or read-only, capacity in bytes, written message size.
+- NFC status card that distinguishes "NFC turned off", "unavailable" and "ready", and still tries a
+  session so the exact CoreNFC error is shown.
 
-## تشغيل المشروع محليًا
+## Run locally
 
 ```bash
 flutter pub get
-flutter run            # على جهاز حقيقي فقط، محاكي iOS لا يدعم NFC
+flutter run            # use a real device, the iOS Simulator has no NFC
 ```
 
-بناء نسخة iOS بدون توقيع (على macOS):
+Build an unsigned iOS app on macOS:
 
 ```bash
 flutter build ios --release --no-codesign
 ```
 
-## تحميل ملف IPA من GitHub Actions
+## Download the IPA from GitHub Actions
 
-1. ادفع أي تعديل إلى فرع `main` أو شغّل الـ workflow يدويًا من تبويب **Actions** → **Build iOS IPA (unsigned)** → **Run workflow**.
-2. بعد انتهاء البناء (حوالي 5–10 دقائق) نزّل الملف من أحد مكانين:
-   - **Actions** → اختر آخر تشغيل → **Artifacts** → `NFC_READ_WRITE-unsigned-ipa`.
-   - أو من صفحة **Releases** في المستودع: `NFC_READ_WRITE-unsigned.ipa`.
-3. وقّع الملف وثبّته على الآيفون بإحدى الأدوات التالية: **Sideloadly**، **ESign**، **AltStore**، **TrollStore**.
+1. Push to `main`, or open **Actions** → **Build iOS IPA (unsigned)** → **Run workflow**.
+2. When the build finishes (about 5–10 minutes) download the file from either place:
+   - **Actions** → latest run → **Artifacts** → `NFC_READ_WRITE-unsigned-ipa`
+   - or the **Releases** page: `NFC_READ_WRITE-unsigned.ipa`
+3. Sign and install it with **Sideloadly**, **ESign**, **AltStore** or **TrollStore**.
 
-الملف ينتج **بدون توقيع** (unsigned)، لذلك لن يُثبَّت مباشرة قبل توقيعه بحسابك.
+The artifact is **unsigned**, so it must be signed before iOS will install it.
 
-## التثبيت على الآيفون
+## Installing on iPhone
 
-- **Sideloadly** (Windows/macOS): اسحب ملف IPA إلى النافذة، أدخل Apple ID، اضغط Start.
-- **ESign / TrollStore**: افتح الملف واختر Sign / Install.
-- بعد التوقيع يُثبَّت التطبيق كأي تطبيق عادي من الشاشة الرئيسية.
+- **Sideloadly** (Windows/macOS): drop the IPA into the window, enter your Apple ID, press Start.
+- **ESign / TrollStore**: open the file and choose Sign / Install.
 
-### ملاحظة مهمة عن NFC على iOS
+### Important NFC note for iOS
 
-قراءة وكتابة NFC على iOS تحتاج صلاحية `com.apple.developer.nfc.readersession.formats`
-وهي **متاحة فقط لحسابات Apple Developer المدفوعة** (99$ سنويًا). عند التوقيع بحساب مجاني
-(Sideloadly / Sideloadly مع Apple ID عادي أو AltStore) سيُثبَّت التطبيق ويعمل كواجهة،
-لكن فحص NFC سيرجع «غير متاح» لأن النظام لا يمنح الصلاحية للتوقيع المجاني.
-الصلاحية موجودة جاهزة في `ios/Runner/Runner.entitlements`، ويعمل NFC مباشرة إذا وقّعت
-الملف ببروفايل يملك صلاحية NFC.
+Reading and writing NFC on iOS needs the `com.apple.developer.nfc.readersession.formats` entitlement,
+which is available only to **paid Apple Developer accounts** ($99/year). When the IPA is signed with a free
+Apple ID the app installs and runs, but `NFCTagReaderSession.readingAvailable` is `false` and no NFC session
+can start — that is an Apple restriction, not an app bug. Sign with a profile that includes the NFC capability
+and the entitlement already present in `ios/Runner/Runner.entitlements` takes effect.
 
-## بنية المشروع
+## Project layout
 
 ```
-lib/main.dart          واجهة التطبيق وإدارة جلسة NFC (nfc_manager / nfc_manager_ndef)
-lib/ndef_codec.dart    ترميز وفك ترميز سجلات NDEF النصية والروابط
+lib/main.dart            App UI and NFC session handling (nfc_manager / nfc_manager_ndef)
+lib/ndef_codec.dart      NDEF text and URI record encoding/decoding
 test/ndef_codec_test.dart
-ios/Runner/Runner.entitlements   صلاحية NFC
-ios/Runner/Info.plist            NFCReaderUsageDescription
-.github/workflows/ios-unsigned-ipa.yml   بناء IPA غير موقّع
+ios/Runner/Runner.entitlements            NFC entitlement
+ios/Runner/Info.plist                     NFCReaderUsageDescription
+.github/workflows/ios-unsigned-ipa.yml    Unsigned IPA build
 ```
 
-## الترخيص
+## License
 
-استخدم المشروع كما تشاء.
+Use it however you like.
