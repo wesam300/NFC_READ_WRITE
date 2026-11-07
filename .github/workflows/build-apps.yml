@@ -1,0 +1,176 @@
+name: Build apps (unsigned IPA + APK)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: builds-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Analyze and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+  ios:
+    name: Build unsigned IPA
+    needs: checks
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Toolchain info
+        run: |
+          flutter --version
+          xcodebuild -version
+          pod --version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build iOS app without code signing
+        run: flutter build ios --release --no-codesign
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          APP_PATH="build/ios/iphoneos/Runner.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "Runner.app not found at $APP_PATH"
+            exit 1
+          fi
+          rm -rf Payload NFC_READ_WRITE-unsigned.ipa
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/Runner.app
+          # An IPA must contain a Payload folder with the .app inside it.
+          zip -qry NFC_READ_WRITE-unsigned.ipa Payload
+          rm -rf Payload
+          ls -lh NFC_READ_WRITE-unsigned.ipa
+          unzip -l NFC_READ_WRITE-unsigned.ipa | head -20
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NFC_READ_WRITE-unsigned-ipa
+          path: NFC_READ_WRITE-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+  android:
+    name: Build Android APK
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Toolchain info
+        run: |
+          flutter --version
+          java -version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Prepare APK
+        run: |
+          set -euo pipefail
+          APK_PATH="build/app/outputs/flutter-apk/app-release.apk"
+          if [ ! -f "$APK_PATH" ]; then
+            echo "APK not found at $APK_PATH"
+            exit 1
+          fi
+          cp "$APK_PATH" NFC_READ_WRITE.apk
+          ls -lh NFC_READ_WRITE.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NFC_READ_WRITE-apk
+          path: NFC_READ_WRITE.apk
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publish release
+    needs: [ios, android]
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download IPA
+        uses: actions/download-artifact@v4
+        with:
+          name: NFC_READ_WRITE-unsigned-ipa
+          path: dist
+
+      - name: Download APK
+        uses: actions/download-artifact@v4
+        with:
+          name: NFC_READ_WRITE-apk
+          path: dist
+
+      - name: Attach builds to a GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: NFC Read Write v1.0.${{ github.run_number }}
+          files: |
+            dist/NFC_READ_WRITE-unsigned.ipa
+            dist/NFC_READ_WRITE.apk
+          body: |
+            NFC Reader & Writer — automatic builds.
+
+            **iPhone (unsigned IPA)** — `NFC_READ_WRITE-unsigned.ipa`
+            1. Download the file from Assets.
+            2. Sign it with Sideloadly, ESign, AltStore or TrollStore.
+            3. Install it on the iPhone.
+
+            iOS only allows NFC when the app is signed with the NFC entitlement
+            (paid Apple Developer account, or TrollStore on a supported iOS version).
+
+            **Android (APK)** — `NFC_READ_WRITE.apk`
+            1. Download the APK and open it on the phone.
+            2. Allow installing from unknown sources and install it.
+            The APK is signed with the debug key, which is fine for sideloading.

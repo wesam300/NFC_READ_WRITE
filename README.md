@@ -1,7 +1,7 @@
 # NFC Reader & Writer
 
 A small Flutter app that reads and writes **NFC / NDEF** tags (text or link records) on **iOS** and **Android**.
-GitHub Actions builds an **unsigned IPA** on every push, ready to be signed with any sideloading tool and installed on an iPhone.
+GitHub Actions builds an **unsigned IPA** (for iPhone, after signing) and an **APK** (for Android) on every push.
 
 ## Features
 
@@ -25,15 +25,17 @@ Build an unsigned iOS app on macOS:
 flutter build ios --release --no-codesign
 ```
 
-## Download the IPA from GitHub Actions
+## Download the builds from GitHub Actions
 
-1. Push to `main`, or open **Actions** → **Build iOS IPA (unsigned)** → **Run workflow**.
-2. When the build finishes (about 5–10 minutes) download the file from either place:
-   - **Actions** → latest run → **Artifacts** → `NFC_READ_WRITE-unsigned-ipa`
-   - or the **Releases** page: `NFC_READ_WRITE-unsigned.ipa`
-3. Sign and install it with **Sideloadly**, **ESign**, **AltStore** or **TrollStore**.
+1. Push to `main`, or open **Actions** → **Build apps (unsigned IPA + APK)** → **Run workflow**.
+2. When the build finishes (about 5–10 minutes) download the files from either place:
+   - **Actions** → latest run → **Artifacts** → `NFC_READ_WRITE-unsigned-ipa` and `NFC_READ_WRITE-apk`
+   - or the **Releases** page: `NFC_READ_WRITE-unsigned.ipa` and `NFC_READ_WRITE.apk`
+3. iPhone: sign the IPA with **Sideloadly**, **ESign**, **AltStore** or **TrollStore**.
+4. Android: copy `NFC_READ_WRITE.apk` to the phone and install it (allow installs from unknown sources).
 
-The artifact is **unsigned**, so it must be signed before iOS will install it.
+The IPA is **unsigned**, so it must be signed before iOS will install it. The APK is signed with the
+debug key, which is enough for sideloading.
 
 ## Installing on iPhone
 
@@ -56,7 +58,7 @@ lib/ndef_codec.dart      NDEF text and URI record encoding/decoding
 test/ndef_codec_test.dart
 ios/Runner/Runner.entitlements            NFC entitlement
 ios/Runner/Info.plist                     NFCReaderUsageDescription
-.github/workflows/ios-unsigned-ipa.yml    Unsigned IPA build
+.github/workflows/build-apps.yml          Analyze/test, unsigned IPA and APK builds
 ```
 
 ## License
